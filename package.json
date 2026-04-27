@@ -4,7 +4,7 @@
   "description": "Addon Stremio para streams brasileiros via IndexaBR com suporte a debrid e torrent direto",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node index.js",
     "dev": "node server.js"
   },
   "engines": {
