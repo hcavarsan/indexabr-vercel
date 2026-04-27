@@ -847,7 +847,106 @@ app.get("/debug/:id/:type/:imdb", async (req, res) => {
     baseUrl,
   });
 });
+// ============================================
+// TORZNAB API (pra Jackett/Radarr/Sonarr)
+// ============================================
 
+function escapeXml(s) {
+  return String(s || '').replace(/[<>&'"]/g, c =>
+    ({'<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;'}[c])
+  );
+}
+
+function streamToTorznabItem(s, idx) {
+  const filename = s.behaviorHints?.filename || s.title?.split('\n')[0] || 'unknown';
+  const titleLine = s.title?.split('\n')[0] || filename;
+  const sizeLine = s.title?.match(/(\d+(?:\.\d+)?)\s*GB/i);
+  const sizeBytes = sizeLine ? Math.round(parseFloat(sizeLine[1]) * 1073741824) : 0;
+  const isTV = /S\d{1,2}E\d{1,3}|S\d{1,2}\b/i.test(filename);
+  const category = isTV ? 5000 : 2000;
+  const guid = `indexabr-${s.infoHash}-${idx}`;
+  const magnet = `magnet:?xt=urn:btih:${s.infoHash}&dn=${encodeURIComponent(filename)}`;
+
+  return `
+    <item>
+      <title>${escapeXml(filename)}</title>
+      <guid>${guid}</guid>
+      <pubDate>${new Date().toUTCString()}</pubDate>
+      <size>${sizeBytes}</size>
+      <link>${escapeXml(magnet)}</link>
+      <enclosure url="${escapeXml(magnet)}" length="${sizeBytes}" type="application/x-bittorrent"/>
+      <category>${category}</category>
+      <torznab:attr name="category" value="${category}"/>
+      <torznab:attr name="size" value="${sizeBytes}"/>
+      <torznab:attr name="infohash" value="${s.infoHash}"/>
+      <torznab:attr name="seeders" value="10"/>
+      <torznab:attr name="peers" value="10"/>
+      <torznab:attr name="downloadvolumefactor" value="0"/>
+      <torznab:attr name="uploadvolumefactor" value="1"/>
+      <torznab:attr name="magneturl" value="${escapeXml(magnet)}"/>
+    </item>`;
+}
+
+app.get('/torznab/api', async (req, res) => {
+  res.type('application/xml');
+  const t = req.query.t;
+
+  // Capabilities
+  if (t === 'caps') {
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+  <server version="1.0" title="IndexaBR Torznab"/>
+  <limits max="100" default="100"/>
+  <searching>
+    <search available="yes" supportedParams="q,imdbid"/>
+    <tv-search available="yes" supportedParams="q,imdbid,season,ep"/>
+    <movie-search available="yes" supportedParams="q,imdbid"/>
+  </searching>
+  <categories>
+    <category id="2000" name="Movies"/>
+    <category id="5000" name="TV"/>
+  </categories>
+</caps>`);
+  }
+
+  // Search
+  if (t === 'search' || t === 'movie' || t === 'tvsearch') {
+    try {
+      let imdbId = req.query.imdbid || '';
+      if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
+
+      if (!imdbId) {
+        return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel><title>IndexaBR</title></channel>
+</rss>`);
+      }
+
+      const type = t === 'tvsearch' ? 'series' : 'movie';
+      const fullId = req.query.season
+        ? `${imdbId}:${req.query.season}:${req.query.ep || 1}`
+        : imdbId;
+
+      const streams = await scrapeAllSources(type, fullId);
+      const items = streams.map((s, i) => streamToTorznabItem(s, i)).join('');
+
+      return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>IndexaBR</title>
+    <description>BeTor + ThePirataFilmes</description>
+    <link>https://github.com/viniciusss100/indexabr-vercel</link>
+    ${items}
+  </channel>
+</rss>`);
+    } catch (err) {
+      console.error('Torznab error:', err);
+      return res.status(500).send(`<error code="500" description="${escapeXml(err.message)}"/>`);
+    }
+  }
+
+  res.status(400).send(`<error code="400" description="Unknown function"/>`);
+});
 app.get(["/", "/configure"], (req, res) => {
   res.sendFile(__dirname + "/public/index.html");
 });

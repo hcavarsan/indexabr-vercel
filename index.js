@@ -1,5 +1,3 @@
 const app = require('./server');
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 IndexaBR rodando na porta ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => console.log(`IndexaBR :${PORT}`));
